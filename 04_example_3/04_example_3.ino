@@ -2,7 +2,7 @@
 unsigned int count, toggle;
 
 void setup() {
-  pinMode(PIN_LED, OUTPUT)
+  pinMode(PIN_LED, OUTPUT);
   Serial.begin(115200);
   while (!Serial){
     ;
@@ -20,5 +20,5 @@ void loop() {
 }
 
 int toggle_state(int toggle){
-  return toggle;
+  return !(toggle);
 }

@@ -83,8 +83,8 @@ float USS_measure(int TRIG, int ECHO)
 
 //get median number function
 float Get_Median(float Raw){
-  float ans;
-  int a, pos;
+  float ans, temp;
+  int a;
   //updating samples
   for(int i=0; i<N-1;i++){
     samples[i]=samples[i+1];

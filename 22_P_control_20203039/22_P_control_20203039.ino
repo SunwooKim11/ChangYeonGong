@@ -16,7 +16,7 @@
 #define _DIST_MAX 410   
 
 // Distance sensor
-#define _DIST_ALPHA 0.28  //[3023] set EMA value
+#define _DIST_ALPHA 0.35  //[3023] set EMA value
 
 // Servo range 
 #define _DUTY_MIN 1325   // 229mm 75 degree          
@@ -25,20 +25,21 @@
 
 // Servo speed control
 #define _SERVO_ANGLE 71.0   //[3030] set servo angle range limit 146-63
-#define _SERVO_SPEED 30.0   // [3040] Servo's angular speed(angle's amount of change per sec) 
+#define _SERVO_SPEED 600.0   // [3040] Servo's angular speed(angle's amount of change per sec) 
 
 // Event periods
-#define _INTERVAL_DIST 10  
+#define _INTERVAL_DIST 10 
 #define _INTERVAL_SERVO 10 
 #define _INTERVAL_SERIAL 100       
 
 // PID parameters
-#define _KP 1.0    //[3039] constant value for PID control
+#define _KP 1.5    //[3039] constant value for PID control
 
-//the number of distance to get filtered distance
-#define LENGTH 30
-#define k_LENGTH 8
-
+//Using in erasing noise 
+#define DELAY_MICROS  1500 //Park WooHuyk , Ema_alpha 0.35, INTERVAL_DIST 30
+//==========================================================================//
+//#define LENGTH 30   //Kim TaeWan
+//#define k_LENGTH 8
 
 //////////////////////
 // global variables //
@@ -46,11 +47,11 @@
 // Servo instance     //[3046]
 Servo myservo;                      //[3030]servo
 
-const float coE[] = {-0.0001109, 0.0701887, -12.2138365, 797.0495159};
+const float coE[] = {0.0000097, 0.0001142, 0.8411323, 41.0076289};
 
 // Distance sensor
 float dist_target; // location to send the ball
-float dist_raw, dist_cali, dist_ema, dist_alpha, dist_list[LENGTH];     //[3034]distance detected by IR sensor and distance applied ema filter
+float dist_raw, dist_cali, dist_ema, dist_alpha;      //[3034]distance detected by IR sensor and distance applied ema filter
 float dist_min, dist_max;
 // Event periods
 unsigned long last_sampling_time_dist, last_sampling_time_servo, last_sampling_time_serial;   //[3039] int value for action execution at interval
@@ -65,7 +66,9 @@ int duty_target, duty_curr;      //[3030]servo target location, servo current lo
 float error_curr, error_prev, control, pterm, dterm, iterm; 
 // [3042] current error, previous error and constant k, p,i,d 
 
-
+//Using in erasing noise 
+float samples_num = 3; //Park WooHuyk , Ema_alpha 0.35, INTERVAL_DIST 30
+//float dist_list[LENGTH]; //Kim TaeWan
 
 void setup() {
 // initialize GPIO pins for LED and attach servo 
@@ -127,65 +130,42 @@ float ir_distance(void){ // return value unit: mm
   val = ((6762.0/(volt-9.0))-4.0) * 10.0; //[3031]
   return val; //[3031]
 }
-/*
+
 //read = [121, 164, 186, 209, 235, 271]
 //made by Choo HunJune
 //https://colab.research.google.com/drive/1GvAVNB1u0lRZyzYpgCEGIWVllIJZ7vXD?usp=sharing#scrollTo=Kk_VTDtHRh1E
 // method to correct raw distance 
-float ir_distance_cali(float ir_dist){
-  float x = ir_dist;
+float ir_distance_cali(void){
+  float x = dist_raw = ir_distance();
   dist_cali = coE[0] * pow(x, 3) + coE[1] * pow(x, 2) + coE[2] * x + coE[3];
   return dist_cali;
 }
 //=================================
 
-*/
-float ir_distance_cali(float ir_dist){
-  float x = ir_dist;
-  dist_cali = 150+(250.0/(252-121))*(ir_dist-121);
-  return dist_cali;
+//made by Park WooHuyk
+//https://github.com/pwh9882/IR_filter/blob/master/noise_filter/noise_filter.ino
+float under_noise_filter(void){ 
+  int currReading;
+  int largestReading = 0;
+  for (int i = 0; i < samples_num; i++) {
+    currReading = ir_distance_cali();
+    if (currReading > largestReading) { largestReading = currReading; }
+    // Delay a short time before taking another reading
+    delayMicroseconds(DELAY_MICROS);
+  }
+  return largestReading;
 }
 
-//made by Kim TaeWan
-//https://gist.github.com/T-WK/715fde5441b68110a239bc1e0eda1db4
-float ir_distance_filtered() {
-  int cnt = 0;
-  float sum = 0;
-  while (cnt < LENGTH) //the number of LENGTH
-  {
-    dist_list[cnt] = ir_distance_cali(ir_distance());
-    sum += dist_list[cnt];
-    cnt++;
+float ir_distance_filtered(void){ 
+  int currReading;
+  int lowestReading = 1024;
+  for (int i = 0; i < samples_num; i++) {
+    currReading = under_noise_filter();
+    if (currReading < lowestReading) { lowestReading = currReading; }
   }
-  
-  
-  // selection sort
-  for (int i = 0; i < LENGTH-1; i++){
-    for (int j = i+1; j < LENGTH; j++){
-      if (dist_list[i] > dist_list[j]) {
-        float tmp = dist_list[i];
-        dist_list[i] = dist_list[j];
-        dist_list[j] = tmp;
-      }
-    }
-  }
-  
-  // dist_cali calculation process
-  for (int i = 0; i < k_LENGTH; i++) {
-    sum -= dist_list[i];
-  }
-  for (int i = 1; i <= k_LENGTH; i++) {
-    sum -= dist_list[LENGTH-i];
-  }
-
-  dist_cali = sum/(LENGTH-2*k_LENGTH);
-  
-  // ema filter 
-  dist_ema = dist_alpha*dist_cali + (1-dist_alpha)*dist_ema;
+  dist_ema = _DIST_ALPHA*lowestReading + (1-_DIST_ALPHA)*dist_ema;
   return dist_ema;
 }
-
-
 void loop() {
 /////////////////////
 // Event generator //
@@ -233,32 +213,8 @@ void loop() {
   }
   
   if(event_serial) {
-    event_serial = false;   
+    event_serial = false;
     // [3030]
-    Serial.print("dist_target:");
-    Serial.print(dist_target);
-    Serial.print("dist_ema:");
-    Serial.print(dist_ema);
-    Serial.print(",error_curr:");
-    Serial.print(error_curr);
-    Serial.print(",duty_target:");
-    Serial.print(duty_target);
-    Serial.print(",duty_curr:");
-    Serial.println(duty_curr);
-
-   // Serial.println(",Min:100,Low:200,dist_target:255,High:310,Max:410");
-    
-  }
-
-  
-}
-
-
-
-
-
-
-/*// [3030]
     Serial.print("dist_ir:");
     Serial.print(dist_raw);
     Serial.print(",pterm:");
@@ -268,4 +224,78 @@ void loop() {
     Serial.print(",duty_curr:");
     Serial.print(map(duty_curr,1000,2000,410,510));
     Serial.println(",Min:100,Low:200,dist_target:255,High:310,Max:410");
-    */
+   
+    
+  }  
+}
+
+
+
+/* //linear cali
+float ir_distance_cali(float ir_dist){
+  float x = ir_dist;
+  dist_cali = 100+(250.0/(252-68))*(ir_dist-68);
+  return dist_cali;
+}*/
+
+/*
+//made by Kim TaeWan
+//https://gist.github.com/T-WK/715fde5441b68110a239bc1e0eda1db4
+float ir_distance_filtered() {
+  int cnt = 0;
+  float sum = 0;
+  while (cnt < LENGTH) //the number of LENGTH
+  { 
+    dist_raw=ir_distance();
+    dist_list[cnt] = ir_distance_cali();
+    sum += dist_list[cnt];
+    cnt++;
+  }
+  
+  
+  // selection sort
+  for (int i = 0; i < LENGTH-1; i++){
+    for (int j = i+1; j < LENGTH; j++){
+      if (dist_list[i] > dist_list[j]) {
+        float tmp = dist_list[i];
+        dist_list[i] = dist_list[j];
+        dist_list[j] = tmp;
+      }
+    }
+  }
+  
+  // dist_cali calculation process
+  for (int i = 0; i < k_LENGTH; i++) {
+    sum -= dist_list[i];
+  }
+  for (int i = 1; i <= k_LENGTH; i++) {
+    sum -= dist_list[LENGTH-i];
+  }
+
+  dist_cali = sum/(LENGTH-2*k_LENGTH);
+  
+  // ema filter 
+  dist_ema = dist_alpha*dist_cali + (1-dist_alpha)*dist_ema;
+  return dist_ema;
+} */
+
+
+
+/*
+ // [3030]
+    Serial.print("dist_target:");
+    Serial.print(dist_target);
+    Serial.print(",dist_cali:");
+    Serial.print(dist_cali);
+    Serial.print(",dist_ema:");
+    Serial.print(dist_ema);
+    Serial.print(",error_curr:");
+    Serial.print(error_curr);
+    Serial.print(",duty_target:");
+    Serial.print(duty_target);
+    Serial.print(",duty_curr:");
+    Serial.println(duty_curr);
+
+ 
+ */
+    
